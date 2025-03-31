@@ -668,6 +668,7 @@ func (c *publisherGRPCClient) Publish(ctx context.Context, req *pubsubpb.Publish
 	var resp *pubsubpb.PublishResponse
 	var err error
 	attempts := 0
+	var settings gax.CallSettings
 
 	for {
 		attempts++
