@@ -36,6 +36,7 @@ import (
 	httptransport "google.golang.org/api/transport/http"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -665,14 +666,30 @@ func (c *publisherGRPCClient) Publish(ctx context.Context, req *pubsubpb.Publish
 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, hds...)
 	opts = append((*c.CallOptions).Publish[0:len((*c.CallOptions).Publish):len((*c.CallOptions).Publish)], opts...)
 	var resp *pubsubpb.PublishResponse
-	err := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
-		var err error
+	var err error
+	attempts := 0
+
+	for {
+		attempts++
+		if attempts == 500 {
+			break
+		}
+
+		ctx, _ := context.WithDeadline(ctx, time.Now().Add(200*time.Millisecond))
 		resp, err = executeRPC(ctx, c.publisherClient.Publish, req, settings.GRPC, c.logger, "Publish")
-		return err
-	}, opts...)
-	if err != nil {
-		return nil, err
+		if err != nil {
+			errCode := status.Code(err)
+			if errCode == codes.DeadlineExceeded {
+				fmt.Println(fmt.Sprintf("attempt number %d, msg to topic %s took longer than 300ms", attempts, req.Topic))
+				continue
+			}
+			fmt.Println(fmt.Sprintf("non-deadline error while publishing to topic %s occurred %s", req.Topic, err.Error()))
+			return nil, err
+		}
+
+		break
 	}
+
 	return resp, nil
 }
 
