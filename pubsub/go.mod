@@ -1,4 +1,4 @@
-module github.com/pgrubacc/google-cloud-go-pubsub-with-publish-timeout
+module github.com/pgrubacc/google-cloud-go-pubsub-with-publish-timeout/pubsub
 
 go 1.23.0
 
