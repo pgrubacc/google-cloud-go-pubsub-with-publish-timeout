@@ -667,23 +667,40 @@ func (c *publisherGRPCClient) Publish(ctx context.Context, req *pubsubpb.Publish
 	opts = append((*c.CallOptions).Publish[0:len((*c.CallOptions).Publish):len((*c.CallOptions).Publish)], opts...)
 	var resp *pubsubpb.PublishResponse
 	var err error
-	attempts := 0
+	timeouts := 0
+	nonTimeoutAttempts := 0
 	var settings gax.CallSettings
 
 	for {
-		attempts++
-		if attempts == 500 {
+		if timeouts >= 2 || nonTimeoutAttempts >= 6 {
+			fmt.Println(fmt.Sprintf("publishing to topic %s failed, timeout attempts %s, nonTimeoutAttempts %s", req.Topic, timeouts, nonTimeoutAttempts))
 			break
 		}
 
-		ctx, _ := context.WithDeadline(ctx, time.Now().Add(200*time.Millisecond))
-		resp, err = executeRPC(ctx, c.publisherClient.Publish, req, settings.GRPC, c.logger, "Publish")
+		var publishCtx context.Context
+		var cancel context.CancelFunc
+
+		if timeouts < 2 {
+			publishCtx, cancel = context.WithDeadline(ctx, time.Now().Add(100*time.Millisecond))
+			defer cancel()
+		} else {
+			publishCtx = ctx
+		}
+
+		resp, err = executeRPC(publishCtx, c.publisherClient.Publish, req, settings.GRPC, c.logger, "Publish")
 		if err != nil {
 			errCode := status.Code(err)
 			if errCode == codes.DeadlineExceeded {
-				fmt.Println(fmt.Sprintf("attempt number %d, msg to topic %s took longer than 300ms", attempts, req.Topic))
+				timeouts++
+				fmt.Println(fmt.Sprintf("attempt number %d, msg to topic %s took longer than 100ms", timeouts, req.Topic))
+				continue
+			} else if errCode == codes.Aborted || errCode == codes.Canceled || errCode == codes.Internal ||
+				errCode == codes.ResourceExhausted || errCode == codes.Unknown || errCode == codes.Unavailable {
+				nonTimeoutAttempts++
+				fmt.Println(fmt.Sprintf("non-deadline error while publishing to topic %s occurred %s", req.Topic, err.Error()))
 				continue
 			}
+
 			fmt.Println(fmt.Sprintf("non-deadline error while publishing to topic %s occurred %s", req.Topic, err.Error()))
 			return nil, err
 		}
