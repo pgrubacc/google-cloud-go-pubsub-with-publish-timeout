@@ -681,14 +681,15 @@ func (c *publisherGRPCClient) Publish(ctx context.Context, req *pubsubpb.Publish
 		var publishCtx context.Context
 		var cancel context.CancelFunc
 
-		if timeouts < 3 && attempts < 6 {
-			publishCtx, cancel = context.WithDeadline(ctx, time.Now().Add(100*time.Millisecond))
+		if timeouts < 4 && attempts < 6 {
+			publishCtx, cancel = context.WithDeadline(ctx, time.Now().Add(300*time.Millisecond))
 			defer cancel()
 		} else {
 			fmt.Println(fmt.Sprintf("timeouts exceeded while publishing to topic %s, using context without timeout, timeouts %d, attempts %d", req.Topic, timeouts, attempts))
 			publishCtx = ctx
 		}
 
+		timeNow := time.Now()
 		resp, err = executeRPC(publishCtx, c.publisherClient.Publish, req, settings.GRPC, c.logger, "Publish")
 		if err != nil {
 			errCode := status.Code(err)
@@ -704,6 +705,9 @@ func (c *publisherGRPCClient) Publish(ctx context.Context, req *pubsubpb.Publish
 
 			fmt.Println(fmt.Sprintf("unexpected error while publishing to topic %s occurred, timeouts %d, attempts %d, error: %s", req.Topic, timeouts, attempts, err.Error()))
 			return nil, err
+		}
+		if timeouts > 3 {
+			fmt.Println(fmt.Sprintf("successfully publishing to topic %s without timeout took %d, timeouts %d, attempts %d", req.Topic, time.Since(timeNow).Milliseconds(), timeouts, attempts))
 		}
 
 		break
