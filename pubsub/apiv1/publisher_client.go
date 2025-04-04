@@ -668,24 +668,23 @@ func (c *publisherGRPCClient) Publish(ctx context.Context, req *pubsubpb.Publish
 	var resp *pubsubpb.PublishResponse
 	var err error
 	timeouts := 0
-	attempts := 0
+	nonTimeoutErrs := 0
 	var settings gax.CallSettings
 
 	for {
-		if attempts >= 9 {
-			fmt.Println(fmt.Sprintf("exceeded attempts while publishing to topic %s, timeouts %d, attempts %d", req.Topic, timeouts, attempts))
-			break
-		}
-		attempts++
-
 		var publishCtx context.Context
 		var cancel context.CancelFunc
 
-		if timeouts < 4 && attempts < 6 {
-			publishCtx, cancel = context.WithDeadline(ctx, time.Now().Add(300*time.Millisecond))
+		if nonTimeoutErrs > 6 {
+			fmt.Println(fmt.Sprintf("non timeout errs exceeded while publishing to topic %s, timeouts %d, nonTimeoutErrs %d", req.Topic, timeouts, nonTimeoutErrs))
+			break
+		}
+
+		if timeouts < 15 {
+			publishCtx, cancel = context.WithDeadline(ctx, time.Now().Add(150*time.Millisecond))
 			defer cancel()
 		} else {
-			fmt.Println(fmt.Sprintf("timeouts exceeded while publishing to topic %s, using context without timeout, timeouts %d, attempts %d", req.Topic, timeouts, attempts))
+			fmt.Println(fmt.Sprintf("timeouts exceeded while publishing to topic %s, using context without timeout, timeouts %d, nonTimeoutErrs %d", req.Topic, timeouts, nonTimeoutErrs))
 			publishCtx = ctx
 		}
 
@@ -695,19 +694,20 @@ func (c *publisherGRPCClient) Publish(ctx context.Context, req *pubsubpb.Publish
 			errCode := status.Code(err)
 			if errCode == codes.DeadlineExceeded {
 				timeouts++
-				fmt.Println(fmt.Sprintf("publishing to topic %s took longer than 100ms, timeouts %d, attempts %d", req.Topic, timeouts, attempts))
+				fmt.Println(fmt.Sprintf("publishing to topic %s took longer than 100ms, timeouts %d, nonTimeoutErrs %d", req.Topic, timeouts, nonTimeoutErrs))
 				continue
 			} else if errCode == codes.Aborted || errCode == codes.Canceled || errCode == codes.Internal ||
 				errCode == codes.ResourceExhausted || errCode == codes.Unknown || errCode == codes.Unavailable {
-				fmt.Println(fmt.Sprintf("non-deadline error while publishing to topic %s occurred, timeouts %d, attempts %d, error: %s", req.Topic, timeouts, attempts, err.Error()))
+				nonTimeoutErrs++
+				fmt.Println(fmt.Sprintf("non-deadline error while publishing to topic %s occurred, timeouts %d, nonTimeoutErrs %d, error: %s", req.Topic, timeouts, nonTimeoutErrs, err.Error()))
 				continue
 			}
 
-			fmt.Println(fmt.Sprintf("unexpected error while publishing to topic %s occurred, timeouts %d, attempts %d, error: %s", req.Topic, timeouts, attempts, err.Error()))
+			fmt.Println(fmt.Sprintf("unexpected error while publishing to topic %s occurred, timeouts %d, nonTimeoutErrs %d, error: %s", req.Topic, timeouts, nonTimeoutErrs, err.Error()))
 			return nil, err
 		}
-		if timeouts > 3 {
-			fmt.Println(fmt.Sprintf("successfully publishing to topic %s without timeout took %d, timeouts %d, attempts %d", req.Topic, time.Since(timeNow).Milliseconds(), timeouts, attempts))
+		if timeouts > 14 {
+			fmt.Println(fmt.Sprintf("successfully publishing to topic %s without timeout took %d, nonTimeoutErrs %d, attempts %d", req.Topic, time.Since(timeNow).Milliseconds(), timeouts, nonTimeoutErrs))
 		}
 
 		break
